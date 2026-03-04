@@ -1,3 +1,8 @@
+import java.util.Properties
+
+val localProps = Properties()
+localProps.load(rootProject.file("local.properties").inputStream())
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -15,9 +20,11 @@ android {
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        manifestPlaceholders["MAPBOX_SECRET_TOKEN"] = localProps["MAPBOX_SECRET_TOKEN"] as String
     }
 
     buildTypes {
