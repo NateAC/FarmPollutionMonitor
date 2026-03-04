@@ -20,6 +20,7 @@ import com.mapbox.geojson.Point
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Arrangement
+import com.mapbox.common.MapboxOptions
 import com.mapbox.maps.Style
 import com.mapbox.maps.extension.compose.MapboxMap
 import com.mapbox.maps.extension.compose.animation.viewport.MapViewportState
@@ -30,6 +31,8 @@ import com.nac45.farmpollutionmonitor.ui.theme.FarmPollutionMonitorTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        MapboxOptions.accessToken = BuildConfig.MAPBOX_ACCESS_TOKEN
 
         setContent {
             FarmPollutionMonitorTheme {

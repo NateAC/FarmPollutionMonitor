@@ -11,9 +11,7 @@ plugins {
 
 android {
     namespace = "com.nac45.farmpollutionmonitor"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.nac45.farmpollutionmonitor"
@@ -23,8 +21,8 @@ android {
         versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        manifestPlaceholders["MAPBOX_SECRET_TOKEN"] = localProps["MAPBOX_SECRET_TOKEN"] as String
+        buildConfigField("String", "MAPBOX_ACCESS_TOKEN", "\"${localProps["MAPBOX_ACCESS_TOKEN"]}\"")
+        manifestPlaceholders["MAPBOX_ACCESS_TOKEN"] = localProps["MAPBOX_ACCESS_TOKEN"] as String
     }
 
     buildTypes {
@@ -45,6 +43,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -57,8 +56,8 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation("com.mapbox.maps:android-ndk27:11.18.2")
-    implementation("com.mapbox.extension:maps-compose-ndk27:11.18.2")
+    implementation("com.mapbox.maps:android:11.18.2")
+    implementation("com.mapbox.extension:maps-compose:11.18.2")
     implementation("androidx.compose.material:material-icons-extended:1.7.6")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
