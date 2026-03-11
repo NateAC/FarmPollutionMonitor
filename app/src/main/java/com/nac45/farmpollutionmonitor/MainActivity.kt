@@ -20,12 +20,19 @@ import com.mapbox.geojson.Point
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Arrangement
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import com.mapbox.common.MapboxOptions
 import com.mapbox.maps.Style
+import com.mapbox.maps.extension.compose.annotation.ViewAnnotation
+import com.mapbox.maps.viewannotation.viewAnnotationOptions
 import com.mapbox.maps.extension.compose.MapboxMap
 import com.mapbox.maps.extension.compose.animation.viewport.MapViewportState
 import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
 import com.mapbox.maps.extension.compose.style.MapStyle
+import com.mapbox.maps.viewannotation.geometry
 import com.nac45.farmpollutionmonitor.ui.theme.FarmPollutionMonitorTheme
 
 class MainActivity : ComponentActivity() {
@@ -107,23 +114,78 @@ fun MainScreen() {
 
 @Composable
 fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) {
+    var showDialog by remember { mutableStateOf(false) }
+    var markers by remember { mutableStateOf(listOf<Point>()) }
+    var latInput by remember { mutableStateOf("") }
+    var lngInput by remember { mutableStateOf("") }
     Box(modifier = Modifier.padding(paddingValues)) {
         MapboxMap(
             modifier = Modifier.fillMaxSize(),
             mapViewportState = mapViewportState,
             style = { MapStyle(style = Style.MAPBOX_STREETS) }
         ) {
-            // Water markers maybe go here
+            markers.forEach { point ->
+                ViewAnnotation(
+                    options = viewAnnotationOptions {
+                        geometry(point)
+                        allowOverlap(true)
+                    }
+                ) {
+                    Icon(
+                        Icons.Default.Place,
+                        contentDescription = "Marker",
+                        tint = Color.Red,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
         }
 
         // Floating action button to add test marker
         FloatingActionButton(
-            onClick = { /* TODO: Add marker */ },
+            onClick = { showDialog = true },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
         ) {
             Icon(Icons.Default.Add, contentDescription = "Add Marker")
+        }
+        if (showDialog) {
+            AlertDialog(
+                onDismissRequest = { showDialog = false },
+                title = { Text("Add Monitoring Site") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = latInput,
+                            onValueChange = { latInput = it },
+                            label = { Text("Latitude") },
+                            placeholder = { Text("e.g. 52.4153") } // Roughly the tesco roundabout :)
+                        )
+                        OutlinedTextField(
+                            value = lngInput,
+                            onValueChange = { lngInput = it },
+                            label = { Text("Longitude") },
+                            placeholder = { Text("e.g. -4.0829") }
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        val lat = latInput.toDoubleOrNull()
+                        val lng = lngInput.toDoubleOrNull()
+                        if (lat != null && lng != null) {
+                            markers = markers + Point.fromLngLat(lng, lat)
+                            showDialog = false
+                            latInput = ""
+                            lngInput = ""
+                        }
+                    }) { Text("Add") }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showDialog = false }) { Text("Cancel") }
+                }
+            )
         }
     }
 }
@@ -133,29 +195,21 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
  */
 @Composable
 fun DataScreen(paddingValues: PaddingValues) {
-    // Sample data for water monitoring sites
-    val monitoringSites = listOf(
-        MonitoringSite("River Teifi", "Phosphorus: 0.12 mg/L", "Nitrates: 4.5 mg/L", "Status: Good", Icons.Default.Water), // Eventually change status attributes to Enum,
-        MonitoringSite("Llyn Brianne", "Phosphorus: 0.08 mg/L", "Nitrates: 2.1 mg/L", "Status: Excellent", Icons.Default.Water), // Just getting the initial idea down!
-        MonitoringSite("Afon Rheidol", "Phosphorus: 0.25 mg/L", "Nitrates: 8.7 mg/L", "Status: Moderate", Icons.Default.Warning),
-        MonitoringSite("River Ystwyth", "Phosphorus: 0.18 mg/L", "Nitrates: 6.2 mg/L", "Status: Good", Icons.Default.Water),
-        MonitoringSite("Llyn Syfydrin", "Phosphorus: 0.05 mg/L", "Nitrates: 1.8 mg/L", "Status: Excellent", Icons.Default.Water),
-        MonitoringSite("Afon Clarach", "Phosphorus: 0.32 mg/L", "Nitrates: 12.4 mg/L", "Status: Poor", Icons.Default.Error)
-    )
+    // viewModel() creates or retrieves the ViewModel for this screen
+    val viewModel: DataViewModel = viewModel()
+    // Track which card is expanded, null means none are expanded
+    var expandedSiteId by remember { mutableStateOf<Int?>(null) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(paddingValues)
-            .padding(top = 0.dp)  // Added this line to remove extra top padding
     ) {
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     text = "Water Monitoring Sites",
                     style = MaterialTheme.typography.headlineSmall,
@@ -169,31 +223,221 @@ fun DataScreen(paddingValues: PaddingValues) {
             }
         }
 
-        // Summary Cards
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            SummaryCard("Total Sites", "${monitoringSites.size}", Icons.Default.Place, modifier = Modifier.weight(1f))
-            SummaryCard("Active Sensors", "6", Icons.Default.Sensors, modifier = Modifier.weight(1f))
-            SummaryCard("Last Update", "2 min ago", Icons.Default.Schedule, modifier = Modifier.weight(1f))
-        }
+        // Show cool loading spinner while data is being fetched!
+        if (viewModel.isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                SummaryCard("Total Sites", "${viewModel.sites.size}", Icons.Default.Place, modifier = Modifier.weight(1f))
+                SummaryCard("Active Sensors", "${viewModel.sites.size}", Icons.Default.Sensors, modifier = Modifier.weight(1f))
+                SummaryCard("Data Points", "5281", Icons.Default.Schedule, modifier = Modifier.weight(1f))
+            }
 
-        // List of sites - Takes remaining space and scrolls (This is my lazy column bits and they are stuck at the bottom of the screen,now solved bc .fillMaxWidth() *I believe* was addding padding
-        // for ALL of my sites therefore they got pushed to the bottom of the screen.
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(16.dp, 0.dp, 16.dp, 16.dp)  // Moved padding here
-        ) {
-            items(monitoringSites) { site ->
-                MonitoringSiteCard(site)
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(16.dp, 0.dp, 16.dp, 16.dp)
+            ) {
+                items(viewModel.sites) { site ->
+                    // Get most recent daily summary for this site if it exists (Black Covert)
+                    val latestSummary = viewModel.dailySummaries
+                        .filter { it.site_id == site.id }
+                        .maxByOrNull { it.date }
+
+                    // Get water quality reading for dummy sites
+                    val reading = viewModel.readings
+                        .find { it.site_id == site.id }
+
+                    SensorSiteCard(
+                        site = site,
+                        summary = latestSummary,
+                        reading = reading,
+                        isExpanded = expandedSiteId == site.id,
+                        onCardClick = {
+                            // Toggle expanded, tap it again to collapse
+                            expandedSiteId = if (expandedSiteId == site.id) null else site.id
+                        }
+                    )
+                }
             }
         }
+    }
+}
+
+
+@Composable
+fun SensorSiteCard(
+    site: MonitoringSiteDB,
+    summary: DailySummary?,
+    reading: WaterQualityReading?,
+    isExpanded: Boolean,
+    onCardClick: () -> Unit
+) {
+    // Use real sensor data for status if available, otherwise use dummy data
+    val statusColor = when {
+        summary != null && summary.avg_ph in 6.5..8.5 && summary.avg_do_mgl > 7.0 -> Color.Green
+        summary != null && summary.avg_ph in 6.0..9.0 && summary.avg_do_mgl > 5.0 -> Color(0xFFFFA500)
+        summary != null -> Color.Red
+        reading?.status == "Excellent" -> Color.Green
+        reading?.status == "Good" -> Color.Blue
+        reading?.status == "Moderate" -> Color(0xFFFFA500)
+        reading?.status == "Poor" -> Color.Red
+        else -> Color.Gray
+    }
+
+    val statusText = when {
+        summary != null && summary.avg_ph in 6.5..8.5 && summary.avg_do_mgl > 7.0 -> "Good"
+        summary != null && summary.avg_ph in 6.0..9.0 && summary.avg_do_mgl > 5.0 -> "Moderate"
+        summary != null -> "Poor"
+        reading != null -> reading.status
+        else -> "No Data"
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onCardClick
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            // Header row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Water,
+                        contentDescription = null,
+                        tint = statusColor
+                    )
+                    Column {
+                        Text(
+                            text = site.name,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = site.region,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = statusColor.copy(alpha = 0.2f)
+                    ) {
+                        Text(
+                            text = statusText,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusColor
+                        )
+                    }
+                    Icon(
+                        if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isExpanded) "Collapse" else "Expand"
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Show real sensor data for Black Covert
+            if (summary != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    MiniStatCard("pH", "${summary.avg_ph}")
+                    MiniStatCard("Temp", "${summary.avg_temperature}°C")
+                    MiniStatCard("DO", "${summary.avg_do_mgl} mg/L")
+                }
+                // Show dummy phosphorus/nitrates for Welsh sites
+            } else if (reading != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    MiniStatCard("Phosphorus", "${reading.phosphorus} mg/L")
+                    MiniStatCard("Nitrates", "${reading.nitrates} mg/L")
+                    MiniStatCard("Status", reading.status)
+                }
+            }
+
+            // Expanded section
+            if (isExpanded) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (summary != null) {
+                    Text(
+                        text = "Latest Daily Average: ${summary.date}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        MiniStatCard("DO Sat", "${summary.avg_do_sat}%")
+                        MiniStatCard("EC", "${summary.avg_ec} µS")
+                        MiniStatCard("Depth", "${summary.avg_depth}m")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Based on ${summary.reading_count} sensor readings",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Lat: ${site.latitude}, Lng: ${site.longitude}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun MiniStatCard(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleSmall
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
     }
 }
 

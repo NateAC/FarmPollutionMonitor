@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -18,11 +19,13 @@ android {
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "1.1"
+        versionName = "1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "MAPBOX_ACCESS_TOKEN", "\"${localProps["MAPBOX_ACCESS_TOKEN"]}\"")
         manifestPlaceholders["MAPBOX_ACCESS_TOKEN"] = localProps["MAPBOX_ACCESS_TOKEN"] as String
+        buildConfigField("String", "SUPABASE_URL", "\"${localProps.getProperty("SUPABASE_URL", "")}\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProps.getProperty("SUPABASE_ANON_KEY", "")}\"")
     }
 
     buildTypes {
@@ -59,6 +62,9 @@ dependencies {
     implementation("com.mapbox.maps:android:11.18.2")
     implementation("com.mapbox.extension:maps-compose:11.18.2")
     implementation("androidx.compose.material:material-icons-extended:1.7.6")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt:2.1.0")
+    implementation("io.ktor:ktor-client-android:2.3.7")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
