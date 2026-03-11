@@ -112,36 +112,57 @@ fun MainScreen() {
     }
 }
 
+/**
+ * Map screen showing all monitoring sites as markers loaded
+ * from the Supabase server. Tapping the floating button previously allowed manual
+ * coordinate entry, I will repurpose later for adding new sites directly to the database.
+ */
 @Composable
 fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) {
+    val viewModel: MapViewModel = viewModel()
     var showDialog by remember { mutableStateOf(false) }
-    var markers by remember { mutableStateOf(listOf<Point>()) }
     var latInput by remember { mutableStateOf("") }
     var lngInput by remember { mutableStateOf("") }
+
     Box(modifier = Modifier.padding(paddingValues)) {
         MapboxMap(
             modifier = Modifier.fillMaxSize(),
             mapViewportState = mapViewportState,
             style = { MapStyle(style = Style.MAPBOX_STREETS) }
         ) {
-            markers.forEach { point ->
+            viewModel.sites.forEach { site ->
+                val point = Point.fromLngLat(site.longitude, site.latitude)
                 ViewAnnotation(
                     options = viewAnnotationOptions {
                         geometry(point)
                         allowOverlap(true)
                     }
                 ) {
-                    Icon(
-                        Icons.Default.Place,
-                        contentDescription = "Marker",
-                        tint = Color.Red,
-                        modifier = Modifier.size(32.dp)
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        // Site name label above the marker, quite ugly right now will try to change later.
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text(
+                                text = site.name,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                        Icon(
+                            Icons.Default.Place, // Red pin icon
+                            contentDescription = site.name,
+                            tint = Color.Red,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
                 }
             }
         }
 
-        // Floating action button to add test marker
         FloatingActionButton(
             onClick = { showDialog = true },
             modifier = Modifier
@@ -150,6 +171,7 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
         ) {
             Icon(Icons.Default.Add, contentDescription = "Add Marker")
         }
+
         if (showDialog) {
             AlertDialog(
                 onDismissRequest = { showDialog = false },
@@ -160,7 +182,7 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                             value = latInput,
                             onValueChange = { latInput = it },
                             label = { Text("Latitude") },
-                            placeholder = { Text("e.g. 52.4153") } // Roughly the tesco roundabout :)
+                            placeholder = { Text("e.g. 52.4153") }
                         )
                         OutlinedTextField(
                             value = lngInput,
@@ -175,7 +197,6 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                         val lat = latInput.toDoubleOrNull()
                         val lng = lngInput.toDoubleOrNull()
                         if (lat != null && lng != null) {
-                            markers = markers + Point.fromLngLat(lng, lat)
                             showDialog = false
                             latInput = ""
                             lngInput = ""

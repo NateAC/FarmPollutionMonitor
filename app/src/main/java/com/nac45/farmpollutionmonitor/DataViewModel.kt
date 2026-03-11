@@ -35,6 +35,7 @@ class DataViewModel : ViewModel() {
             try {
                 sites = fetchMonitoringSites()
                 readings = fetchReadings()
+                dailySummaries = fetchLatestDailySummaries() // Added daily summaries now, missing beforehand.
                 // Test to catch silent error
                 android.util.Log.d("DataViewModel", "Sites loaded: ${sites.size}")
                 android.util.Log.d("DataViewModel", "Readings loaded: ${readings.size}")
