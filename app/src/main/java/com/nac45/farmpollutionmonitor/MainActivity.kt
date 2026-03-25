@@ -34,6 +34,28 @@ import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportS
 import com.mapbox.maps.extension.compose.style.MapStyle
 import com.mapbox.maps.viewannotation.geometry
 import com.nac45.farmpollutionmonitor.ui.theme.FarmPollutionMonitorTheme
+ import com.mapbox.maps.extension.compose.MapEffect
+ import com.mapbox.maps.extension.style.layers.addLayer
+ import com.mapbox.maps.extension.style.layers.generated.fillLayer
+ import com.mapbox.maps.extension.style.layers.generated.lineLayer
+ import com.mapbox.maps.extension.style.sources.addSource
+ import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
+ import com.mapbox.maps.plugin.gestures.addOnMapClickListener
+ import com.mapbox.geojson.Feature
+ import com.mapbox.geojson.FeatureCollection
+ import com.mapbox.maps.QueriedRenderedFeature
+ import androidx.compose.material3.BottomSheetDefaults
+ import androidx.compose.material3.ExperimentalMaterial3Api
+ import androidx.compose.material3.ModalBottomSheet
+ import androidx.compose.material3.rememberModalBottomSheetState
+ import androidx.compose.ui.text.font.FontWeight
+
+// Source and layer IDs, kept as constants so they're consistent between adding them and querying them on tap
+private const val LAKES_SOURCE_ID  = "wfd-lakes-source"
+private const val RIVERS_SOURCE_ID = "wfd-rivers-source"
+private const val LAKES_FILL_LAYER = "wfd-lakes-fill"
+private const val LAKES_LINE_LAYER = "wfd-lakes-outline"
+private const val RIVERS_LINE_LAYER = "wfd-rivers-line"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,12 +139,18 @@ fun MainScreen() {
  * from the Supabase server. Tapping the floating button previously allowed manual
  * coordinate entry, I will repurpose later for adding new sites directly to the database.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) {
-    val viewModel: MapViewModel = viewModel()
+    val mapViewModel: MapViewModel = viewModel()
+    val wfdViewModel: WfdViewModel = viewModel()
+
     var showDialog by remember { mutableStateOf(false) }
     var latInput by remember { mutableStateOf("") }
     var lngInput by remember { mutableStateOf("") }
+
+    // Bottom sheet state, shown when user taps a WFD waterbody
+    val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     Box(modifier = Modifier.padding(paddingValues)) {
         MapboxMap(
@@ -130,7 +158,8 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
             mapViewportState = mapViewportState,
             style = { MapStyle(style = Style.MAPBOX_STREETS) }
         ) {
-            viewModel.sites.forEach { site ->
+            // Monitoring site markers (from Supabase)
+            mapViewModel.sites.forEach { site ->
                 val point = Point.fromLngLat(site.longitude, site.latitude)
                 ViewAnnotation(
                     options = viewAnnotationOptions {
@@ -138,10 +167,7 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                         allowOverlap(true)
                     }
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        // Site name label above the marker, quite ugly right now will try to change later.
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Surface(
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
                             shape = MaterialTheme.shapes.small
@@ -153,7 +179,7 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                             )
                         }
                         Icon(
-                            Icons.Default.Place, // Red pin icon
+                            Icons.Default.Water,
                             contentDescription = site.name,
                             tint = Color.Red,
                             modifier = Modifier.size(32.dp)
@@ -161,17 +187,188 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                     }
                 }
             }
+
+            // WFD GeoJSON layers via MapEffect
+            MapEffect(
+                key1 = wfdViewModel.lakesGeoJson,
+                key2 = wfdViewModel.riversGeoJson
+            ) { mapView ->
+                mapView.mapboxMap.addOnStyleLoadedListener {
+                    val style = mapView.mapboxMap.style ?: return@addOnStyleLoadedListener
+
+                    // ── Lakes: filled polygons ──
+                    wfdViewModel.lakesGeoJson?.let { geojson ->
+                        // Remove old source/layers if refreshing
+                        if (style.styleSourceExists(LAKES_SOURCE_ID)) {
+                            style.removeStyleLayer(LAKES_FILL_LAYER)
+                            style.removeStyleLayer(LAKES_LINE_LAYER)
+                            style.removeStyleSource(LAKES_SOURCE_ID)
+                        }
+
+                        style.addSource(
+                            geoJsonSource(LAKES_SOURCE_ID) { data(geojson) }
+                        )
+
+                        // Semi-transparent fill coloured by OverallStatus
+                        style.addLayer(
+                            fillLayer(LAKES_FILL_LAYER, LAKES_SOURCE_ID) {
+                                fillColor(
+                                    com.mapbox.maps.extension.style.expressions.dsl.generated.match {
+                                        get { literal("OverallStatus") }
+                                        literal("High");     color(android.graphics.Color.parseColor("#2196F3"))
+                                        literal("Good");     color(android.graphics.Color.parseColor("#4CAF50"))
+                                        literal("Moderate"); color(android.graphics.Color.parseColor("#FF9800"))
+                                        literal("Poor");     color(android.graphics.Color.parseColor("#F44336"))
+                                        literal("Bad");      color(android.graphics.Color.parseColor("#9C27B0"))
+                                        color(android.graphics.Color.parseColor("#9E9E9E"))
+                                    }
+                                )
+                                fillOpacity(0.4)
+                            }
+                        )
+
+                        // Solid outline so the lake shape is clear even at low opacity
+                        style.addLayer(
+                            lineLayer(LAKES_LINE_LAYER, LAKES_SOURCE_ID) {
+                                lineColor("#000000")
+                                lineOpacity(0.3)
+                                lineWidth(1.0)
+                            }
+                        )
+                    }
+
+                    // Rivers: coloured polylines
+                    wfdViewModel.riversGeoJson?.let { geojson ->
+                        if (style.styleSourceExists(RIVERS_SOURCE_ID)) {
+                            style.removeStyleLayer(RIVERS_LINE_LAYER)
+                            style.removeStyleSource(RIVERS_SOURCE_ID)
+                        }
+
+                        style.addSource(
+                            geoJsonSource(RIVERS_SOURCE_ID) { data(geojson) }
+                        )
+
+                        style.addLayer(
+                            lineLayer(RIVERS_LINE_LAYER, RIVERS_SOURCE_ID) {
+                                lineColor(
+                                    com.mapbox.maps.extension.style.expressions.dsl.generated.match {
+                                        get { literal("OverallStatus") }
+                                        literal("High");     color(android.graphics.Color.parseColor("#2196F3"))
+                                        literal("Good");     color(android.graphics.Color.parseColor("#4CAF50"))
+                                        literal("Moderate"); color(android.graphics.Color.parseColor("#FF9800"))
+                                        literal("Poor");     color(android.graphics.Color.parseColor("#F44336"))
+                                        literal("Bad");      color(android.graphics.Color.parseColor("#9C27B0"))
+                                        color(android.graphics.Color.parseColor("#9E9E9E"))
+                                    }
+                                )
+                                lineWidth(3.0)
+                                lineOpacity(0.8)
+                            }
+                        )
+                    }
+                }
+
+                // Tap listener for WFD features
+                // Queries rendered features at the tap point and checks if any belong to the WFD layers. If so, show the bottom sheet
+                mapView.mapboxMap.addOnMapClickListener { point ->
+                    mapView.mapboxMap.queryRenderedFeatures(
+                        com.mapbox.maps.RenderedQueryGeometry(
+                            com.mapbox.maps.ScreenCoordinate(
+                                mapView.mapboxMap.pixelForCoordinate(point).x,
+                                mapView.mapboxMap.pixelForCoordinate(point).y
+                            )
+                        ),
+                        com.mapbox.maps.RenderedQueryOptions(
+                            listOf(LAKES_FILL_LAYER, RIVERS_LINE_LAYER), null
+                        )
+                    ) { result ->
+                        val features = result.value ?: return@queryRenderedFeatures
+                        if (features.isNotEmpty()) {
+                            val feature = features.first().queriedFeature.feature
+                            val props = feature.properties() ?: return@queryRenderedFeatures
+
+                            // Determine if this is a lake or river by which layer it came from
+                            val layerId = features.first().layers.firstOrNull()
+                            val type = if (layerId == LAKES_FILL_LAYER) WaterbodyType.LAKE else WaterbodyType.RIVER
+
+                            wfdViewModel.onWaterbodyTapped(
+                                WaterbodyProperties(
+                                    name = props.get("WB_NAME")?.asString?.trim() ?: "Unknown",
+                                    wbid = props.get("WBID")?.asString?.trim() ?: "",
+                                    overallStatus = props.get("OverallStatus")?.asString?.trim(),
+                                    ecoStatus = props.get("EcoStatus")?.asString?.trim(),
+                                    chemStatus = props.get("ChemStatus")?.asString?.trim(),
+                                    dissolvedOxygen = props.get("DO")?.asString?.trim(),
+                                    totalPhosphorus = props.get("Total_P")?.asString?.trim(),
+                                    sqKms = props.get("SqKms")?.asString?.trim(),
+                                    region = props.get("Region")?.asString?.trim(),
+                                    type = type
+                                )
+                            )
+                        }
+                    }
+                    false // Return false so Mapbox still handles the event normally
+                }
+            }
         }
 
-        FloatingActionButton(
-            onClick = { showDialog = true },
+        // Loading indicator for WFD data
+        if (wfdViewModel.isLoadingLakes || wfdViewModel.isLoadingRivers) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 8.dp),
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                tonalElevation = 4.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Text("Loading WFD data...", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+
+        // Error Snackbar
+        wfdViewModel.errorMessage?.let { error ->
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 8.dp),
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.errorContainer
+            ) {
+                Text(
+                    text = error,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+
+        // Floating Action Buttons
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(16.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Add Marker")
+            // Refresh WFD data button
+            SmallFloatingActionButton(onClick = { wfdViewModel.refresh() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh WFD layers")
+            }
+            // Existing add site button
+            FloatingActionButton(onClick = { showDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Add Monitoring Site")
+            }
         }
 
+        // Site Dialog
         if (showDialog) {
             AlertDialog(
                 onDismissRequest = { showDialog = false },
@@ -208,6 +405,147 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                 }
             )
         }
+    }
+
+    // WFD Waterbody detail bottom sheet
+    // Sits outside the Box so it renders over the whole screen properly
+    wfdViewModel.selectedWaterbody?.let { waterbody ->
+        ModalBottomSheet(
+            onDismissRequest = { wfdViewModel.onBottomSheetDismissed() },
+            sheetState = bottomSheetState
+        ) {
+            WaterbodyBottomSheet(waterbody = waterbody)
+        }
+    }
+}
+
+/**
+ * Bottom sheet content shown when a WFD lake or river is tapped.
+ * Shows the key WFD classification fields from the dataset.
+ */
+@Composable
+fun WaterbodyBottomSheet(waterbody: WaterbodyProperties) {
+    val statusColor = when (waterbody.overallStatus?.trim()) {
+        "High"     -> Color(0xFF2196F3)
+        "Good"     -> Color(0xFF4CAF50)
+        "Moderate" -> Color(0xFFFF9800)
+        "Poor"     -> Color(0xFFF44336)
+        "Bad"      -> Color(0xFF9C27B0)
+        else       -> Color(0xFF9E9E9E)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = waterbody.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = if (waterbody.type == WaterbodyType.LAKE) "WFD Lake Waterbody" else "WFD River Waterbody",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+            // Overall status badge
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = statusColor.copy(alpha = 0.15f)
+            ) {
+                Text(
+                    text = waterbody.overallStatus ?: "Unknown",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = statusColor,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        HorizontalDivider()
+
+        // WFD classification breakdown
+        Text(
+            text = "WFD Classification",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            WfdStatItem(label = "Overall", value = waterbody.overallStatus ?: "—")
+            WfdStatItem(label = "Ecological", value = waterbody.ecoStatus ?: "—")
+            WfdStatItem(label = "Chemical", value = waterbody.chemStatus ?: "—")
+        }
+
+        // Lake-specific fields
+        if (waterbody.type == WaterbodyType.LAKE) {
+            HorizontalDivider()
+            Text(
+                text = "Water Quality Indicators",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                WfdStatItem(label = "Dissolved O₂", value = waterbody.dissolvedOxygen ?: "—")
+                WfdStatItem(label = "Total Phosphorus", value = waterbody.totalPhosphorus ?: "—")
+                WfdStatItem(label = "Area (km²)", value = waterbody.sqKms ?: "—")
+            }
+        }
+
+        HorizontalDivider()
+
+        // Metadata
+        waterbody.region?.let {
+            Text(
+                text = "Region: $it",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
+        }
+        Text(
+            text = "Waterbody ID: ${waterbody.wbid}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+        )
+        Text(
+            text = "Source: Natural Resources Wales — WFD Cycle 2",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+        )
+    }
+}
+
+@Composable
+fun WfdStatItem(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
     }
 }
 
