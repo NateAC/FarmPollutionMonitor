@@ -9,9 +9,7 @@ import kotlinx.coroutines.launch
 
 /**
  * ViewModel for the Map screen.
- * Fetches monitoring site coordinates from Supabase so they
- * can be displayed as markers on the map automatically —
- * no hardcoded coordinates in the code!
+ * Fetches monitoring site coordinates from Supabase.
  */
 class MapViewModel : ViewModel() {
 

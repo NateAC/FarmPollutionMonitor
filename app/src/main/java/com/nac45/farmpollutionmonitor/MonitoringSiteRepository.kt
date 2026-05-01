@@ -22,7 +22,7 @@ data class WaterQualityReading( // Current dummy data files, will eventually cha
 )
 
 @Serializable
-data class DailySummary( // Real-world data from Edore's study a few years ago, does not monitor phosphorus or nitrates but
+data class DailySummary( // Real-world data from Edore's study a few years ago, does not monitor phosphorus or nitrates
     val site_id: Int,
     val date: String,
     val avg_temperature: Double,
@@ -33,6 +33,32 @@ data class DailySummary( // Real-world data from Edore's study a few years ago, 
     val avg_depth: Double,
     val reading_count: Int
 )
+
+@Serializable
+data class NewMonitoringSite(
+    val name: String,
+    val region: String,
+    val latitude: Double,
+    val longitude: Double
+)
+
+// Inserts a new monitoring site into Supabase.
+// Region is hardcoded to Ceredigion for now since thats the project scope, but could be a dropdown in a future version to support other regions!
+suspend fun insertMonitoringSite(
+    name: String,
+    region: String,
+    latitude: Double,
+    longitude: Double
+) {
+    supabase.from("monitoring_sites").insert(
+        NewMonitoringSite(
+            name = name,
+            region = region,
+            latitude = latitude,
+            longitude = longitude
+        )
+    )
+}
 
 suspend fun fetchMonitoringSites(): List<MonitoringSiteDB> {
     return supabase.from("monitoring_sites").select().decodeList()

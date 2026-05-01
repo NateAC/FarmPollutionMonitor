@@ -1,6 +1,7 @@
 package com.nac45.farmpollutionmonitor
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -45,6 +46,7 @@ import com.nac45.farmpollutionmonitor.ui.theme.FarmPollutionMonitorTheme
  import com.mapbox.geojson.FeatureCollection
  import com.mapbox.maps.QueriedRenderedFeature
  import androidx.compose.material3.BottomSheetDefaults
+ import androidx.compose.runtime.LaunchedEffect
  import androidx.compose.material3.ExperimentalMaterial3Api
  import androidx.compose.material3.ModalBottomSheet
  import androidx.compose.material3.rememberModalBottomSheetState
@@ -189,14 +191,19 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
             }
 
             // WFD GeoJSON layers via MapEffect
+            /**
+             * MapEffect gets access to the actual Mapbox map object beneath the Compose wrapper.
+             * Adding GeoJSON layers isn't supported directly in Compose Mapbox, so you have to drop down to the raw map API to do it. Runs again if lakesGeoJson or riversGeoJson changes (e.g. after a refresh)
+             * Sometimes the layers also don't load, this is fixed by going onto another tab and coming back!
+             */
             MapEffect(
                 key1 = wfdViewModel.lakesGeoJson,
                 key2 = wfdViewModel.riversGeoJson
             ) { mapView ->
-                mapView.mapboxMap.addOnStyleLoadedListener {
-                    val style = mapView.mapboxMap.style ?: return@addOnStyleLoadedListener
+                mapView.mapboxMap.subscribeStyleLoaded {
+                    val style = mapView.mapboxMap.style ?: return@subscribeStyleLoaded
 
-                    // ── Lakes: filled polygons ──
+                    // Lakes: Coloured polygons
                     wfdViewModel.lakesGeoJson?.let { geojson ->
                         // Remove old source/layers if refreshing
                         if (style.styleSourceExists(LAKES_SOURCE_ID)) {
@@ -205,7 +212,7 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                             style.removeStyleSource(LAKES_SOURCE_ID)
                         }
 
-                        style.addSource(
+                        style.addSource( // Adds the GeoJSON data; the raw data Mapbox holds in memory.
                             geoJsonSource(LAKES_SOURCE_ID) { data(geojson) }
                         )
 
@@ -215,15 +222,15 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                                 fillColor(
                                     com.mapbox.maps.extension.style.expressions.dsl.generated.match {
                                         get { literal("OverallStatus") }
-                                        literal("High");     color(android.graphics.Color.parseColor("#2196F3"))
-                                        literal("Good");     color(android.graphics.Color.parseColor("#4CAF50"))
-                                        literal("Moderate"); color(android.graphics.Color.parseColor("#FF9800"))
-                                        literal("Poor");     color(android.graphics.Color.parseColor("#F44336"))
-                                        literal("Bad");      color(android.graphics.Color.parseColor("#9C27B0"))
-                                        color(android.graphics.Color.parseColor("#9E9E9E"))
+                                        literal("High");     color(android.graphics.Color.parseColor("#2196F3")) // Blue
+                                        literal("Good");     color(android.graphics.Color.parseColor("#4CAF50")) // Green
+                                        literal("Moderate"); color(android.graphics.Color.parseColor("#FF9800")) // Orange
+                                        literal("Poor");     color(android.graphics.Color.parseColor("#F44336")) // Red
+                                        literal("Bad");      color(android.graphics.Color.parseColor("#9C27B0")) // Purple
+                                        color(android.graphics.Color.parseColor("#9E9E9E")) // Grey
                                     }
                                 )
-                                fillOpacity(0.4)
+                                fillOpacity(0.6)
                             }
                         )
 
@@ -238,6 +245,8 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                     }
 
                     // Rivers: coloured polylines
+                    // No fill because lines instead of polygons, so only the lineLayer is needed
+                    // The rivers dataset uses ECO_CLASS instead of OverallStatus for the status field. They mean the same thing, they are just from different datasets.
                     wfdViewModel.riversGeoJson?.let { geojson ->
                         if (style.styleSourceExists(RIVERS_SOURCE_ID)) {
                             style.removeStyleLayer(RIVERS_LINE_LAYER)
@@ -252,7 +261,7 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                             lineLayer(RIVERS_LINE_LAYER, RIVERS_SOURCE_ID) {
                                 lineColor(
                                     com.mapbox.maps.extension.style.expressions.dsl.generated.match {
-                                        get { literal("OverallStatus") }
+                                        get { literal("ECO_CLASS") }
                                         literal("High");     color(android.graphics.Color.parseColor("#2196F3"))
                                         literal("Good");     color(android.graphics.Color.parseColor("#4CAF50"))
                                         literal("Moderate"); color(android.graphics.Color.parseColor("#FF9800"))
@@ -262,52 +271,77 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                                     }
                                 )
                                 lineWidth(3.0)
-                                lineOpacity(0.8)
+                                lineOpacity(0.6)
                             }
                         )
+
+
                     }
-                }
-
-                // Tap listener for WFD features
-                // Queries rendered features at the tap point and checks if any belong to the WFD layers. If so, show the bottom sheet
-                mapView.mapboxMap.addOnMapClickListener { point ->
-                    mapView.mapboxMap.queryRenderedFeatures(
-                        com.mapbox.maps.RenderedQueryGeometry(
-                            com.mapbox.maps.ScreenCoordinate(
-                                mapView.mapboxMap.pixelForCoordinate(point).x,
-                                mapView.mapboxMap.pixelForCoordinate(point).y
-                            )
-                        ),
-                        com.mapbox.maps.RenderedQueryOptions(
-                            listOf(LAKES_FILL_LAYER, RIVERS_LINE_LAYER), null
-                        )
-                    ) { result ->
-                        val features = result.value ?: return@queryRenderedFeatures
-                        if (features.isNotEmpty()) {
-                            val feature = features.first().queriedFeature.feature
-                            val props = feature.properties() ?: return@queryRenderedFeatures
-
-                            // Determine if this is a lake or river by which layer it came from
-                            val layerId = features.first().layers.firstOrNull()
-                            val type = if (layerId == LAKES_FILL_LAYER) WaterbodyType.LAKE else WaterbodyType.RIVER
-
-                            wfdViewModel.onWaterbodyTapped(
-                                WaterbodyProperties(
-                                    name = props.get("WB_NAME")?.asString?.trim() ?: "Unknown",
-                                    wbid = props.get("WBID")?.asString?.trim() ?: "",
-                                    overallStatus = props.get("OverallStatus")?.asString?.trim(),
-                                    ecoStatus = props.get("EcoStatus")?.asString?.trim(),
-                                    chemStatus = props.get("ChemStatus")?.asString?.trim(),
-                                    dissolvedOxygen = props.get("DO")?.asString?.trim(),
-                                    totalPhosphorus = props.get("Total_P")?.asString?.trim(),
-                                    sqKms = props.get("SqKms")?.asString?.trim(),
-                                    region = props.get("Region")?.asString?.trim(),
-                                    type = type
+                    // Tap listener for WFD features
+                    // When the user taps anywhere on the map, query what features are at that point.
+                    // Only care about the two WFD layers, so if neither is tapped it just ignores it!
+                    mapView.mapboxMap.addOnMapClickListener { point ->
+                        mapView.mapboxMap.queryRenderedFeatures(
+                            com.mapbox.maps.RenderedQueryGeometry(
+                                com.mapbox.maps.ScreenCoordinate(
+                                    mapView.mapboxMap.pixelForCoordinate(point).x,
+                                    mapView.mapboxMap.pixelForCoordinate(point).y
                                 )
+                            ),
+                            com.mapbox.maps.RenderedQueryOptions(
+                                listOf(LAKES_FILL_LAYER, RIVERS_LINE_LAYER), null
                             )
+                        ) { result ->
+                            val features = result.value ?: return@queryRenderedFeatures
+                            if (features.isNotEmpty()) {
+                                val feature = features.first().queriedFeature.feature
+                                val props = feature.properties() ?: return@queryRenderedFeatures
+                                Log.d("WfdTap", "Tapped feature props: $props") // Debugging polyline colours, can remove later.
+
+                                // Determine if this is a lake or river by which layer it came from.
+                                val layerId = features.first().layers.firstOrNull()
+                                val type = if (layerId == LAKES_FILL_LAYER) WaterbodyType.LAKE else WaterbodyType.RIVER
+
+                                // Lakes and rivers use completely different field names in their datasets, so check isLake before reading each property.
+                                //  !it.isJsonNull checks if the value is actually null before trying to read it as a string. Returns null safely instead of crashing now!
+                                val isLake = type == WaterbodyType.LAKE
+
+                                wfdViewModel.onWaterbodyTapped(
+                                    WaterbodyProperties(
+                                        name          = if (isLake)
+                                            props.get("WB_NAME")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: "Unknown"
+                                        else
+                                            props.get("NAME")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: "Unknown",
+                                        wbid          = if (isLake)
+                                            props.get("WBID")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: ""
+                                        else
+                                            props.get("EA_WB_ID")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: "",
+                                        overallStatus = if (isLake)
+                                            props.get("OverallStatus")?.takeIf { !it.isJsonNull }?.asString?.trim()
+                                        else
+                                            props.get("ECO_CLASS")?.takeIf { !it.isJsonNull }?.asString?.trim(),
+                                        ecoStatus     = if (isLake)
+                                            props.get("EcoStatus")?.takeIf { !it.isJsonNull }?.asString?.trim()
+                                        else
+                                            props.get("ECO_CLASS")?.takeIf { !it.isJsonNull }?.asString?.trim(),
+                                        chemStatus    = if (isLake)
+                                            props.get("ChemStatus")?.takeIf { !it.isJsonNull }?.asString?.trim()
+                                        else
+                                            props.get("CHEM_CLASS")?.takeIf { !it.isJsonNull }?.asString?.trim(),
+                                        dissolvedOxygen = props.get("DO")?.takeIf { !it.isJsonNull }?.asString?.trim(),
+                                        totalPhosphorus = props.get("Total_P")?.takeIf { !it.isJsonNull }?.asString?.trim(),
+                                        sqKms           = props.get("SqKms")?.takeIf { !it.isJsonNull }?.asString?.trim(),
+                                        region          = if (isLake)
+                                            props.get("Region")?.takeIf { !it.isJsonNull }?.asString?.trim()
+                                        else
+                                            props.get("RBD_NAME")?.takeIf { !it.isJsonNull }?.asString?.trim(),
+                                        type            = type
+                                    )
+                                )
+                            }
                         }
+                        false // Return false so Mapbox still handles the event normally
                     }
-                    false // Return false so Mapbox still handles the event normally
                 }
             }
         }
@@ -368,13 +402,27 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
             }
         }
 
-        // Site Dialog
+        // Add site dialog: Collects name, lat, long then inserts into Supabase.
+        // Region is hardcoded to Ceredigion for now since that's the project scope. Future version could have a dropdown to show other regions!
         if (showDialog) {
+            var nameInput by remember { mutableStateOf("") }
+            var isInserting by remember { mutableStateOf(false) }
+            var insertError by remember { mutableStateOf<String?>(null) }
+
             AlertDialog(
-                onDismissRequest = { showDialog = false },
+                onDismissRequest = {
+                    showDialog = false
+                    insertError = null
+                },
                 title = { Text("Add Monitoring Site") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = nameInput,
+                            onValueChange = { nameInput = it },
+                            label = { Text("Site Name") },
+                            placeholder = { Text("e.g. River Teifi at Cardigan") }
+                        )
                         OutlinedTextField(
                             value = latInput,
                             onValueChange = { latInput = it },
@@ -387,23 +435,75 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                             label = { Text("Longitude") },
                             placeholder = { Text("e.g. -4.0829") }
                         )
+                        // Show error message if insert fails
+                        insertError?.let {
+                            Text(
+                                text = it,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                     }
                 },
                 confirmButton = {
-                    Button(onClick = {
-                        val lat = latInput.toDoubleOrNull()
-                        val lng = lngInput.toDoubleOrNull()
-                        if (lat != null && lng != null) {
-                            showDialog = false
-                            latInput = ""
-                            lngInput = ""
+                    Button(
+                        onClick = {
+                            val lat = latInput.toDoubleOrNull()
+                            val lng = lngInput.toDoubleOrNull()
+                            if (nameInput.isBlank()) {
+                                insertError = "Please enter a site name"
+                            } else if (lat == null || lng == null) {
+                                insertError = "Please enter valid coordinates"
+                            } else {
+                                isInserting = true
+                                insertError = null
+                            }
+                        },
+                        enabled = !isInserting
+                    ) {
+                        if (isInserting) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Add")
                         }
-                    }) { Text("Add") }
+                    }
                 },
                 dismissButton = {
-                    OutlinedButton(onClick = { showDialog = false }) { Text("Cancel") }
+                    OutlinedButton(
+                        onClick = {
+                            showDialog = false
+                            insertError = null
+                        }
+                    ) { Text("Cancel") }
                 }
             )
+
+            // Do the actual Supabase insert when isInserting flips to true.
+            // Using LaunchedEffect so it runs in a coroutine safely from Compose
+            if (isInserting) {
+                val lat = latInput.toDoubleOrNull() ?: 0.0
+                val lng = lngInput.toDoubleOrNull() ?: 0.0
+                LaunchedEffect(Unit) {
+                    try {
+                        insertMonitoringSite(
+                            name = nameInput.trim(),
+                            region = "Ceredigion", // hardcoded for now
+                            latitude = lat,
+                            longitude = lng
+                        )
+                        // Success closes the dialog and reset fields
+                        showDialog = false
+                        nameInput = ""
+                        latInput = ""
+                        lngInput = ""
+                    } catch (e: Exception) {
+                        insertError = "Failed to save: ${e.message}" // Otherwise error:
+                        android.util.Log.e("AddSite", "Insert failed: ${e.message}")
+                    } finally {
+                        isInserting = false
+                    }
+                }
+            }
         }
     }
 
@@ -487,9 +587,9 @@ fun WaterbodyBottomSheet(waterbody: WaterbodyProperties) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            WfdStatItem(label = "Overall", value = waterbody.overallStatus ?: "—")
-            WfdStatItem(label = "Ecological", value = waterbody.ecoStatus ?: "—")
-            WfdStatItem(label = "Chemical", value = waterbody.chemStatus ?: "—")
+            WfdStatItem(label = "Overall", value = waterbody.overallStatus ?: "-")
+            WfdStatItem(label = "Ecological", value = waterbody.ecoStatus ?: "-")
+            WfdStatItem(label = "Chemical", value = waterbody.chemStatus ?: "-")
         }
 
         // Lake-specific fields
@@ -504,9 +604,9 @@ fun WaterbodyBottomSheet(waterbody: WaterbodyProperties) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                WfdStatItem(label = "Dissolved O₂", value = waterbody.dissolvedOxygen ?: "—")
-                WfdStatItem(label = "Total Phosphorus", value = waterbody.totalPhosphorus ?: "—")
-                WfdStatItem(label = "Area (km²)", value = waterbody.sqKms ?: "—")
+                WfdStatItem(label = "Dissolved O₂", value = waterbody.dissolvedOxygen ?: "-")
+                WfdStatItem(label = "Total Phosphorus", value = waterbody.totalPhosphorus ?: "-")
+                WfdStatItem(label = "Area (km²)", value = waterbody.sqKms ?: "-")
             }
         }
 
@@ -526,7 +626,7 @@ fun WaterbodyBottomSheet(waterbody: WaterbodyProperties) {
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
         )
         Text(
-            text = "Source: Natural Resources Wales — WFD Cycle 2",
+            text = "Source: Natural Resources Wales - WFD Cycle 2",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
         )
@@ -891,7 +991,7 @@ fun ProfileScreen(paddingValues: PaddingValues) {
     }
 }
 
-// HELPER COMPOSABLES
+// Helper Composables
 
 data class MonitoringSite(
     val name: String,

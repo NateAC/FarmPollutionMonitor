@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
  */
 class WfdViewModel : ViewModel() {
 
-    // Raw GeoJSON strings — passed directly into Mapbox GeoJsonSource
+    // Raw GeoJSON strings - passed directly into Mapbox GeoJsonSource
     var lakesGeoJson by mutableStateOf<String?>(null)
         private set
 
