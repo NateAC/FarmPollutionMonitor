@@ -42,10 +42,6 @@ import com.nac45.farmpollutionmonitor.ui.theme.FarmPollutionMonitorTheme
  import com.mapbox.maps.extension.style.sources.addSource
  import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
  import com.mapbox.maps.plugin.gestures.addOnMapClickListener
- import com.mapbox.geojson.Feature
- import com.mapbox.geojson.FeatureCollection
- import com.mapbox.maps.QueriedRenderedFeature
- import androidx.compose.material3.BottomSheetDefaults
  import androidx.compose.runtime.LaunchedEffect
  import androidx.compose.material3.ExperimentalMaterial3Api
  import androidx.compose.material3.ModalBottomSheet
@@ -296,7 +292,6 @@ fun MapScreen(mapViewportState: MapViewportState, paddingValues: PaddingValues) 
                             if (features.isNotEmpty()) {
                                 val feature = features.first().queriedFeature.feature
                                 val props = feature.properties() ?: return@queryRenderedFeatures
-                                Log.d("WfdTap", "Tapped feature props: $props") // Debugging polyline colours, can remove later.
 
                                 // Determine if this is a lake or river by which layer it came from.
                                 val layerId = features.first().layers.firstOrNull()

@@ -11,9 +11,7 @@ import kotlinx.coroutines.launch
 /**
  * Holds WFD GeoJSON data for lakes and rivers.
  * Fetched once on creation and cached, so don't need to refetch each time.
- *
- * Also tracks which waterbody the user has tapped so the
- * bottom sheet knows what details to show.
+ * Also tracks which water #body the user has tapped so the bottom sheet knows what details to show.
  */
 class WfdViewModel : ViewModel() {
 
@@ -34,8 +32,8 @@ class WfdViewModel : ViewModel() {
     var errorMessage by mutableStateOf<String?>(null)
         private set
 
-    // The waterbody the user tapped activates the bottom sheet
-    // Properties pulled from the GeoJSON feature
+    // The waterbody the user taps activates the bottom sheet
+    // Properties are pulled from the GeoJSON feature
     var selectedWaterbody by mutableStateOf<WaterbodyProperties?>(null)
         private set
 

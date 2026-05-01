@@ -33,7 +33,7 @@ data class DailySummary( // Real-world data from Edore's study a few years ago, 
     val avg_depth: Double,
     val reading_count: Int
 )
-
+// NewMonitoringSite is separate from MonitoringSiteDB because MonitoringSiteDB has an id field. Supabase sends it over causing crashes.
 @Serializable
 data class NewMonitoringSite(
     val name: String,

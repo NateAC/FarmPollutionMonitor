@@ -29,7 +29,6 @@ suspend fun fetchWfdLakes(): String? = withContext(Dispatchers.IO) {
         )
         Log.d(TAG, "Fetching WFD lakes from: $url")
         val result = URL(url).readText()
-        Log.d(TAG, "Response preview: ${result.take(500)}") // debug
         Log.d(TAG, "WFD lakes fetched successfully")
         result
     } catch (e: Exception) {
@@ -51,7 +50,6 @@ suspend fun fetchWfdRivers(): String? = withContext(Dispatchers.IO) {
         )
         Log.d(TAG, "Fetching WFD rivers from: $url")
         val result = URL(url).readText()
-        Log.d(TAG, "Response preview: ${result.take(500)}")
         Log.d(TAG, "WFD rivers fetched successfully")
         result
     } catch (e: Exception) {
